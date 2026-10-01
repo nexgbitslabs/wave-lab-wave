@@ -1,0 +1,259 @@
+version: "1.0"
+
+metadata:
+  name: jenkins-to-wave-mapping
+  description: >
+    Maps recognized Jenkins pipeline behaviors to Wave Lab workflow
+    capabilities defined in docs/workflow-catalog.md.
+
+rules:
+
+  # ============================================================
+  # APPLICATION CI
+  # ============================================================
+
+  - id: jenkins-container-build
+    category: application
+    description: Detect Docker container image builds.
+
+    detect:
+      any:
+        - command_contains: "docker build"
+        - jenkins_stage_contains: "Build Container Image"
+
+    wave_capability: container-build
+
+    extract:
+      - application_name
+      - dockerfile
+      - build_context
+      - image_tag
+
+
+  - id: jenkins-container-publish
+    category: application
+    description: Detect publication of container images to Azure Container Registry.
+
+    detect:
+      any:
+        - command_contains: "docker push"
+        - command_contains: "az acr login"
+        - jenkins_stage_contains: "Push Container Image to ACR"
+
+    wave_capability: container-publish
+
+    extract:
+      - application_name
+      - image_tag
+      - registry_name
+      - registry_login_server
+
+    security:
+      credentials:
+        classification: secret
+        migrate_to_repository_parameters: false
+
+
+  # ============================================================
+  # GITOPS
+  # ============================================================
+
+  - id: jenkins-gitops-promotion
+    category: deployment
+    description: >
+      Detect Jenkins behavior that modifies a GitOps repository after
+      publishing an application image.
+
+    detect:
+      all:
+        - command_contains: "git clone"
+        - command_contains: "git commit"
+        - command_contains: "git push"
+
+      any:
+        - jenkins_stage_contains: "Update GitOps Image"
+        - file_reference_contains: "deployment.yaml"
+
+    wave_capability: gitops-promotion
+
+    extract:
+      - gitops_repository
+      - gitops_branch
+      - deployment_file
+      - application_name
+      - registry_login_server
+      - image_tag
+      - environment
+
+    constraints:
+      direct_kubernetes_deployment: false
+      deployment_controller: flux-v2
+
+    notes:
+      - >
+        The generated Wave workflow must update GitOps desired state.
+        It must not deploy the application directly to AKS.
+      - >
+        Flux v2 remains responsible for reconciling the desired state
+        against the Kubernetes cluster.
+
+
+  # ============================================================
+  # TERRAFORM
+  # ============================================================
+
+  - id: jenkins-terraform-initialize
+    category: infrastructure
+
+    detect:
+      any:
+        - command_contains: "terraform init"
+        - jenkins_action_equals: "initialize"
+
+    wave_capability: terraform-initialize
+
+    lifecycle:
+      automatic_next_action: false
+
+    allowed_operations:
+      - terraform init
+      - terraform validate
+
+    forbidden_operations:
+      - terraform plan
+      - terraform apply
+      - terraform destroy
+
+
+  - id: jenkins-terraform-plan
+    category: infrastructure
+
+    detect:
+      any:
+        - command_contains: "terraform plan"
+        - jenkins_action_equals: "plan"
+
+    wave_capability: terraform-plan
+
+    lifecycle:
+      automatic_next_action: false
+
+    allowed_operations:
+      - terraform plan
+
+    forbidden_operations:
+      - terraform apply
+      - terraform destroy
+
+
+  - id: jenkins-terraform-apply
+    category: infrastructure
+
+    detect:
+      any:
+        - command_contains: "terraform apply"
+        - jenkins_action_equals: "apply"
+
+    wave_capability: terraform-apply
+
+    lifecycle:
+      automatic_next_action: false
+
+    requirements:
+      existing_saved_plan: true
+
+    forbidden_implicit_operations:
+      - terraform init
+      - terraform plan
+      - terraform destroy
+
+
+  - id: jenkins-terraform-destroy
+    category: infrastructure
+
+    detect:
+      any:
+        - command_contains: "terraform destroy"
+        - jenkins_action_equals: "destroy"
+
+    wave_capability: terraform-destroy
+
+    lifecycle:
+      automatic_next_action: false
+      explicit_request_required: true
+
+    forbidden_implicit_operations:
+      - terraform init
+      - terraform plan
+      - terraform apply
+
+
+  # ============================================================
+  # JENKINS PROPERTIES
+  # ============================================================
+
+  - id: jenkins-properties
+    category: configuration
+
+    detect:
+      any:
+        - path_matches: "Jenkins/properties/*.properties"
+        - command_contains: "readProperties"
+
+    migration:
+      target: repository-parameters.yaml
+
+    classification:
+      default: non-secret
+
+    rules:
+      - >
+        Environment configuration may be migrated into repository
+        parameters.
+      - >
+        Credentials, passwords, tokens, client secrets and other
+        sensitive values must not be written to repository-parameters.yaml.
+
+
+  # ============================================================
+  # CREDENTIALS
+  # ============================================================
+
+  - id: jenkins-credentials
+    category: security
+
+    detect:
+      any:
+        - jenkins_step_contains: "withCredentials"
+        - expression_contains: "credentialsId"
+
+    migration:
+      copy_secret_values: false
+      target: execution-platform-secrets
+
+    rules:
+      - Never copy credential values.
+      - Record only the required credential purpose.
+      - Generate a migration requirement for the target platform.
+      - Never expose secret values in migration reports.
+
+
+  # ============================================================
+  # UNSUPPORTED BEHAVIOR
+  # ============================================================
+
+  - id: unsupported-jenkins-behavior
+    category: migration-control
+
+    when:
+      no_mapping_found: true
+
+    action: report
+
+    severity: warning
+
+    rules:
+      - Do not silently discard the Jenkins behavior.
+      - Do not invent a Wave capability.
+      - Include the unsupported behavior in the migration report.
+      - Require human review.
