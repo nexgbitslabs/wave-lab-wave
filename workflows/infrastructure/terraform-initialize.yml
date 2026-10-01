@@ -1,0 +1,67 @@
+name: Wave Terraform Initialize
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: Terraform environment to initialize
+        required: true
+        type: string
+
+      terraform_version:
+        description: Terraform version
+        required: false
+        default: "1.16.4"
+        type: string
+
+      working_directory:
+        description: Terraform environment directory
+        required: true
+        type: string
+
+    secrets:
+      azure_client_id:
+        required: true
+
+      azure_tenant_id:
+        required: true
+
+      azure_subscription_id:
+        required: true
+
+jobs:
+  initialize:
+    name: Terraform Initialize - ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform_version }}
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.azure_client_id }}
+          tenant-id: ${{ secrets.azure_tenant_id }}
+          subscription-id: ${{ secrets.azure_subscription_id }}
+
+      - name: Terraform Init
+        run: |
+          terraform init -reconfigure
+
+      - name: Terraform Validate
+        run: |
+          terraform validate
