@@ -1,0 +1,141 @@
+name: Wave Terraform
+
+on:
+  workflow_call:
+    inputs:
+      action:
+        description: Terraform lifecycle operation
+        required: true
+        type: string
+
+      environment:
+        description: Target environment
+        required: true
+        type: string
+
+      terraform_version:
+        description: Terraform version
+        required: false
+        default: "1.16.4"
+        type: string
+
+      working_directory:
+        description: Terraform environment directory
+        required: true
+        type: string
+
+      var_file:
+        description: Terraform variable file
+        required: false
+        default: ""
+        type: string
+
+    secrets:
+      azure_client_id:
+        required: true
+
+      azure_tenant_id:
+        required: true
+
+      azure_subscription_id:
+        required: true
+
+jobs:
+
+  validate-action:
+    name: Validate Terraform Action
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate requested action
+        env:
+          ACTION: ${{ inputs.action }}
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          case "${ACTION}" in
+            initialize|plan|apply|destroy)
+              echo "Terraform action: ${ACTION}"
+              ;;
+            *)
+              echo "ERROR: Unsupported Terraform action: ${ACTION}"
+              echo "Allowed actions: initialize, plan, apply, destroy"
+              exit 1
+              ;;
+          esac
+
+          case "${ENVIRONMENT}" in
+            dev|qa|uat|prod)
+              echo "Environment: ${ENVIRONMENT}"
+              ;;
+            *)
+              echo "ERROR: Unsupported environment: ${ENVIRONMENT}"
+              echo "Allowed environments: dev, qa, uat, prod"
+              exit 1
+              ;;
+          esac
+
+  initialize:
+    needs: validate-action
+    if: inputs.action == 'initialize'
+
+    uses: ./.github/workflows/terraform-initialize.yml
+
+    with:
+      environment: ${{ inputs.environment }}
+      terraform_version: ${{ inputs.terraform_version }}
+      working_directory: ${{ inputs.working_directory }}
+
+    secrets:
+      azure_client_id: ${{ secrets.azure_client_id }}
+      azure_tenant_id: ${{ secrets.azure_tenant_id }}
+      azure_subscription_id: ${{ secrets.azure_subscription_id }}
+
+  plan:
+    needs: validate-action
+    if: inputs.action == 'plan'
+
+    uses: ./.github/workflows/terraform-plan.yml
+
+    with:
+      environment: ${{ inputs.environment }}
+      terraform_version: ${{ inputs.terraform_version }}
+      working_directory: ${{ inputs.working_directory }}
+      var_file: ${{ inputs.var_file }}
+
+    secrets:
+      azure_client_id: ${{ secrets.azure_client_id }}
+      azure_tenant_id: ${{ secrets.azure_tenant_id }}
+      azure_subscription_id: ${{ secrets.azure_subscription_id }}
+
+  apply:
+    needs: validate-action
+    if: inputs.action == 'apply'
+
+    uses: ./.github/workflows/terraform-apply.yml
+
+    with:
+      environment: ${{ inputs.environment }}
+      terraform_version: ${{ inputs.terraform_version }}
+      working_directory: ${{ inputs.working_directory }}
+
+    secrets:
+      azure_client_id: ${{ secrets.azure_client_id }}
+      azure_tenant_id: ${{ secrets.azure_tenant_id }}
+      azure_subscription_id: ${{ secrets.azure_subscription_id }}
+
+  destroy:
+    needs: validate-action
+    if: inputs.action == 'destroy'
+
+    uses: ./.github/workflows/terraform-destroy.yml
+
+    with:
+      environment: ${{ inputs.environment }}
+      terraform_version: ${{ inputs.terraform_version }}
+      working_directory: ${{ inputs.working_directory }}
+      var_file: ${{ inputs.var_file }}
+
+    secrets:
+      azure_client_id: ${{ secrets.azure_client_id }}
+      azure_tenant_id: ${{ secrets.azure_tenant_id }}
+      azure_subscription_id: ${{ secrets.azure_subscription_id }}
