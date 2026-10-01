@@ -65,3 +65,18 @@ jobs:
       - name: Terraform Validate
         run: |
           terraform validate
+
+      - name: Package initialized Terraform environment
+        run: |
+          tar \
+            --exclude="*.tfstate" \
+            --exclude="*.tfstate.*" \
+            -czf /tmp/terraform-initialized-${{ inputs.environment }}.tar.gz \
+            .
+
+      - name: Upload initialized Terraform environment
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-initialized-${{ inputs.environment }}
+          path: /tmp/terraform-initialized-${{ inputs.environment }}.tar.gz
+          retention-days: 1
