@@ -1,0 +1,108 @@
+name: Wave Terraform Apply
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: Terraform environment to apply
+        required: true
+        type: string
+
+      terraform_version:
+        description: Terraform version
+        required: false
+        default: "1.16.4"
+        type: string
+
+      working_directory:
+        description: Terraform environment directory
+        required: true
+        type: string
+
+    secrets:
+      azure_client_id:
+        required: true
+
+      azure_tenant_id:
+        required: true
+
+      azure_subscription_id:
+        required: true
+
+jobs:
+  apply:
+    name: Terraform Apply - ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform_version }}
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.azure_client_id }}
+          tenant-id: ${{ secrets.azure_tenant_id }}
+          subscription-id: ${{ secrets.azure_subscription_id }}
+
+      - name: Download initialized Terraform environment
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-initialized-${{ inputs.environment }}
+          path: /tmp/wave-terraform-initialized
+
+      - name: Restore initialized Terraform environment
+        run: |
+          set -e
+
+          ARTIFACT="/tmp/wave-terraform-initialized/terraform-initialized-${{ inputs.environment }}.tar.gz"
+          TARGET="${{ inputs.working_directory }}"
+
+          if [ ! -f "${ARTIFACT}" ]; then
+            echo "ERROR: Initialized Terraform artifact was not found."
+            echo "Run initialize first."
+            exit 1
+          fi
+
+          mkdir -p "${TARGET}"
+
+          tar \
+            -xzf "${ARTIFACT}" \
+            -C "${TARGET}"
+
+      - name: Download Terraform Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan-${{ inputs.environment }}
+          path: /tmp/wave-terraform-plan
+
+      - name: Restore Terraform Plan
+        run: |
+          set -e
+
+          PLAN="/tmp/wave-terraform-plan/tfplan"
+          TARGET="${{ inputs.working_directory }}/tfplan"
+
+          if [ ! -f "${PLAN}" ]; then
+            echo "ERROR: Terraform plan artifact was not found."
+            echo "Run the plan operation first."
+            exit 1
+          fi
+
+          cp "${PLAN}" "${TARGET}"
+
+      - name: Terraform Apply
+        working-directory: ${{ inputs.working_directory }}
+        run: |
+          terraform apply \
+            -auto-approve \
+            tfplan
