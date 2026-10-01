@@ -1,0 +1,97 @@
+name: Wave Terraform Destroy
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: Terraform environment to destroy
+        required: true
+        type: string
+
+      terraform_version:
+        description: Terraform version
+        required: false
+        default: "1.16.4"
+        type: string
+
+      working_directory:
+        description: Terraform environment directory
+        required: true
+        type: string
+
+      var_file:
+        description: Terraform variable file
+        required: true
+        type: string
+
+    secrets:
+      azure_client_id:
+        required: true
+
+      azure_tenant_id:
+        required: true
+
+      azure_subscription_id:
+        required: true
+
+jobs:
+  destroy:
+    name: Terraform Destroy - ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform_version }}
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.azure_client_id }}
+          tenant-id: ${{ secrets.azure_tenant_id }}
+          subscription-id: ${{ secrets.azure_subscription_id }}
+
+      - name: Download initialized Terraform environment
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-initialized-${{ inputs.environment }}
+          path: /tmp/wave-terraform-initialized
+
+      - name: Restore initialized Terraform environment
+        run: |
+          set -e
+
+          ARTIFACT="/tmp/wave-terraform-initialized/terraform-initialized-${{ inputs.environment }}.tar.gz"
+          TARGET="${{ inputs.working_directory }}"
+
+          if [ ! -f "${ARTIFACT}" ]; then
+            echo "ERROR: Initialized Terraform artifact was not found."
+            echo "Run the initialize operation first."
+            exit 1
+          fi
+
+          mkdir -p "${TARGET}"
+
+          tar \
+            -xzf "${ARTIFACT}" \
+            -C "${TARGET}"
+
+          if [ ! -d "${TARGET}/.terraform" ]; then
+            echo "ERROR: Restored artifact does not contain Terraform initialization data."
+            exit 1
+          fi
+
+      - name: Terraform Destroy
+        working-directory: ${{ inputs.working_directory }}
+        run: |
+          terraform destroy \
+            -var-file="${{ inputs.var_file }}" \
+            -auto-approve
