@@ -43,10 +43,6 @@ jobs:
       contents: read
       id-token: write
 
-    defaults:
-      run:
-        working-directory: ${{ inputs.working_directory }}
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -63,15 +59,38 @@ jobs:
           tenant-id: ${{ secrets.azure_tenant_id }}
           subscription-id: ${{ secrets.azure_subscription_id }}
 
-      - name: Verify Terraform initialization
+      - name: Download initialized Terraform environment
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-initialized-${{ inputs.environment }}
+          path: /tmp/wave-terraform-initialized
+
+      - name: Restore initialized Terraform environment
         run: |
-          if [ ! -d ".terraform" ]; then
-            echo "ERROR: Terraform has not been initialized."
+          set -e
+
+          ARTIFACT="/tmp/wave-terraform-initialized/terraform-initialized-${{ inputs.environment }}.tar.gz"
+          TARGET="${{ inputs.working_directory }}"
+
+          if [ ! -f "${ARTIFACT}" ]; then
+            echo "ERROR: Initialized Terraform artifact was not found."
             echo "Run the initialize operation first."
             exit 1
           fi
 
+          mkdir -p "${TARGET}"
+
+          tar \
+            -xzf "${ARTIFACT}" \
+            -C "${TARGET}"
+
+          if [ ! -d "${TARGET}/.terraform" ]; then
+            echo "ERROR: Restored artifact does not contain Terraform initialization data."
+            exit 1
+          fi
+
       - name: Terraform Plan
+        working-directory: ${{ inputs.working_directory }}
         run: |
           terraform plan \
             -var-file="${{ inputs.var_file }}" \
