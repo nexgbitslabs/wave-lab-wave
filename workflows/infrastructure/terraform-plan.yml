@@ -1,0 +1,85 @@
+name: Wave Terraform Plan
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: Terraform environment to plan
+        required: true
+        type: string
+
+      terraform_version:
+        description: Terraform version
+        required: false
+        default: "1.16.4"
+        type: string
+
+      working_directory:
+        description: Terraform environment directory
+        required: true
+        type: string
+
+      var_file:
+        description: Terraform variable file
+        required: true
+        type: string
+
+    secrets:
+      azure_client_id:
+        required: true
+
+      azure_tenant_id:
+        required: true
+
+      azure_subscription_id:
+        required: true
+
+jobs:
+  plan:
+    name: Terraform Plan - ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform_version }}
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.azure_client_id }}
+          tenant-id: ${{ secrets.azure_tenant_id }}
+          subscription-id: ${{ secrets.azure_subscription_id }}
+
+      - name: Verify Terraform initialization
+        run: |
+          if [ ! -d ".terraform" ]; then
+            echo "ERROR: Terraform has not been initialized."
+            echo "Run the initialize operation first."
+            exit 1
+          fi
+
+      - name: Terraform Plan
+        run: |
+          terraform plan \
+            -var-file="${{ inputs.var_file }}" \
+            -out=tfplan
+
+      - name: Upload Terraform Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-${{ inputs.environment }}
+          path: ${{ inputs.working_directory }}/tfplan
+          retention-days: 1
